@@ -12,7 +12,8 @@ def src_testdata() -> Path:
 
 
 @pytest.fixture(scope="session")
-def testdata(tmp_path_factory) -> Path:
+def testdata(tmp_path_factory: pytest.TempPathFactory) -> Path:
     srcdir = Path(_here / "testdata")
     testdir = tmp_path_factory.mktemp("testdata")
     shutil.copytree(srcdir, testdir)
+    return testdir

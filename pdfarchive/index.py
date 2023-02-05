@@ -7,7 +7,8 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Union
+from urllib.parse import ParseResult, urlparse
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -15,10 +16,10 @@ from jinja2 import Environment, FileSystemLoader
 class RecursiveIndexer:
     def __init__(
         self,
-        base_url: Path,
-        base_dir: Path,
+        base_url: Union[str, ParseResult],
+        base_dir: Union[str, Path],
         archive_title: str = "",
-        current_dir: Optional[Path] = None,
+        current_dir: Union[str, Path, None] = None,
         resolve: bool = True,
         debug: bool = False,
     ) -> None:
@@ -29,20 +30,27 @@ class RecursiveIndexer:
         Things will end messily if the indexer cannot write to a destination.
         """
 
-        # Canonicalize base URL
-        if not base_url.endswith("/"):
-            base_url = base_url + "/"
-        self.base_url = base_url
+        # Put everything into canonically-typed form  (Path can accept a
+        # Path as input)
+        if type(base_url) is str:
+            self.base_url = urlparse(base_url)
+        elif type(base_url) is ParseResult:
+            self.base_url = base_url
+        else:
+            # Shouldn't be able to happen, but mypy wasn't smart enough to
+            # realize that type(base_url) is either str or ParseResult
+            raise RuntimeError("base_url is neither str nor ParseResult")
+        self.base_dir = Path(base_dir)
+        if current_dir:
+            self.current_dir = Path(current_dir)
+        else:
+            self.current_dir = self.base_dir
+        self.resolve = resolve
+        self.debug = debug
 
         # Do path resolution (if required) and sanity checks.
         # Resolution is turned on by default, but if you have part of your
         # tree symlinked from somewhere else, it will break.
-        self.base_dir = base_dir.resolve()
-        self.debug = debug
-        if current_dir is None:
-            self.current_dir = self.base_dir
-        else:
-            self.current_dir = current_dir
         if resolve:
             self.base_dir = self.base_dir.resolve()
             self.current_dir = self.current_dir.resolve()
@@ -58,13 +66,13 @@ class RecursiveIndexer:
         if archive_title:
             self.archive_title = archive_title
         else:
-            self.archive_title = self.base_dir.name()
+            self.archive_title = self.base_dir.name
 
         # Set up logging
         self.logger = logging.getLogger()
         self.logger.setLevel("INFO")
         self.logger.info(f"Indexer created for {self.current_dir}")
-        if debug:
+        if self.debug:
             self.logger.setLevel("DEBUG")
             self.logger.debug(
                 f"Debugging enabled for indexer at {self.current_dir}"
@@ -88,10 +96,10 @@ class RecursiveIndexer:
             dirs = list()
             files = list()
             archives = list()
-            for child in self.current_dir:
-                if child.is_dir:
+            for child in self.current_dir.iterdir():
+                if child.is_dir():
                     dirs.append(child)
-                if child.is_file:
+                if child.is_file():
                     if child.suffix.lower() in ("pdf", "jpg", "png"):
                         files.append(child)
                     if child.suffix.lower() in ("zip", "gz", "tar", "xz"):
@@ -127,18 +135,19 @@ class RecursiveIndexer:
             title = self.current_dir.name
         page = template.render(title=title, page_content=page_content)
         self.logger.debug(f"Index for {self.current_dir}:\n{page}")
+        return page
 
     def generate_containing(self, c_id: str) -> str:
         template = self.jinja_environment.get_template(
             "containing_dir.template"
         )
-        containing_dir = str(self.current_dir.parent())
+        containing_dir = str(self.current_dir.parent)
 
         return template.render(
             containing_id=c_id, containing_dir=containing_dir
         )
 
-    def generate_dir_contents(self, dirs: List(Path)) -> str:
+    def generate_dir_content(self, dirs: List[Path]) -> str:
         if not dirs:
             return ""
         tbl_template = self.jinja_environment.get_template("dirtable.template")
@@ -148,7 +157,7 @@ class RecursiveIndexer:
             dir_string += dir_template.render(dir_id=str(c), dir_name=str(d))
         return tbl_template.render(dirs=dir_string)
 
-    def generate_archive_contents(self, archives: List(Path)) -> str:
+    def generate_archive_content(self, archives: List[Path]) -> str:
         if not archives:
             return ""
         tbl_template = self.jinja_environment.get_template(
@@ -162,7 +171,7 @@ class RecursiveIndexer:
             )
         return tbl_template.render(archives=arc_string)
 
-    def generate_file_contents(self, files: List(Path)) -> str:
+    def generate_file_content(self, files: List[Path]) -> str:
         if not files:
             return ""
         tbl_template = self.jinja_environment.get_template(
@@ -188,8 +197,9 @@ class RecursiveIndexer:
             )
             return
         tgt_scriptdir = Path(self.base_dir / "scripts")
-        src_scriptdir = Path(__file__ / "assets" / "scripts")
-        for scriptfile in src_scriptdir:
+        here = Path(__file__).parent
+        src_scriptdir = Path(here / "assets" / "scripts")
+        for scriptfile in src_scriptdir.iterdir():
             shutil.copyfile(scriptfile, Path(tgt_scriptdir / scriptfile.name))
             self.logger.debug("Copied {scriptfile} to {tgt_scriptdir}")
         shutil.copyfile(
@@ -201,7 +211,14 @@ class RecursiveIndexer:
         # Generate our own index page first
         self.write_index_page()
         # Now recurse down the tree
-        for child in self.current_dir:
-            if child.is_dir:
+        for child in self.current_dir.iterdir():
+            if child.is_dir():
                 child.chmod(0o755)
-                self.index_pages(child)
+                childindexer = self.__class__(
+                    base_url=self.base_url,
+                    base_dir=self.base_dir,
+                    current_dir=child,
+                    resolve=self.resolve,
+                    debug=self.debug,
+                )
+                childindexer.index_pages()
