@@ -1,0 +1,8 @@
+<div style="clear: both"></div>
+<div id="containing_{{containing_id}}">
+<a href="{{containing_dir}}">
+    <img src="/rpgicons/back.gif"
+    alt="[ Back arrow ]" />
+    Enclosing directory
+</a>
+</div>

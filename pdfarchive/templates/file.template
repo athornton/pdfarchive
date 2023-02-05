@@ -1,0 +1,9 @@
+<div class="pdffile" id="fileid_{{file_id}}">
+    <a href="./{{file_name}}">
+    <img src="{{base_dir}}/Thumbs/{{partial_path}}/{{thumb_name}}"
+         alt="[{{base_name}}]"
+         title="[{{base_name}}]"
+    </a><br>
+    <a href="./{{file_name}}">{{base_name}}</a><br>
+    <a href="{{base_dir}}/Text/{{partial_path}}/{{text_name}}"
+<div>
