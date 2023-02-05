@@ -1,8 +1,6 @@
 <div class="dir" id="dirid_{{dir_id}}">
-    <a href="{{./{{dir_name}}">
-    <img src="/rpgicons/folder.png"
-         alt="[{{dir_name}}]"
-	 title="[{{dir_name}}]">
-	     dir_name<p>
+    <a href="{{./{{dir_name}}"
+       data-feather="folder">
+       {{dir_name}}
     </a>
 </div>

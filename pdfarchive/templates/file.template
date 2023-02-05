@@ -1,4 +1,4 @@
-<div class="pdffile" id="fileid_{{file_id}}">
+<div class="file" id="fileid_{{file_id}}">
     <a href="./{{file_name}}">
     <img src="{{base_dir}}/Thumbs/{{partial_path}}/{{thumb_name}}"
          alt="[{{base_name}}]"

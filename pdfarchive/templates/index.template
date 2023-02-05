@@ -10,6 +10,7 @@
 <body>
 <script src="/scripts/jquery-3.6.3.min.js"></script>
 <script src="/scripts/shade.js"></script>
+<script src="/scripts/feather.min.js"></script>
 <div id="wholepage">
 <div id="header">
     <h1>
@@ -19,18 +20,16 @@
     <h2>
         Search Text
     </h2>
-        <a href="/cgi-bin/search.cgi">
+        <a href="/cgi-bin/search.cgi"
+	   data-feather="search">
 	    Search for text in {{top_name}}
 	</a>
         <p>
-    <hr>
-<br>
 <div style="clear: both"></div>
+<hr>
 {{page_content}}
-<br>
-<div style="clear: both"></div>
-<div id="footer">
-{{footer_contents}}
-</div>
+<script>
+  feather.replace()
+</script>
 </body>
 </html>
