@@ -5,6 +5,7 @@ named "Text" or "Thumbs" since those contain extracted text and preview images.
 """
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import List, Optional
 
@@ -99,9 +100,11 @@ class RecursiveIndexer:
             rescan = False  # When we do archive expansion we will set it to
             # true after expanding archives
 
-        # Links to containing directory only make sense *not* at the
-        # archive root.
-        if self.current_dir != self.base_dir:
+        if self.current_dir == self.base_dir:
+            self.copy_sitewide_files()
+        else:
+            # Links to containing directory only make sense *not* at the
+            # archive root.
             upper_enc = self.generate_containing("top")
             lower_enc = self.generate_containing("bottom")
 
@@ -122,7 +125,8 @@ class RecursiveIndexer:
             title = self.archive_title
         else:
             title = self.current_dir.name
-        return template.render(title=title, page_content=page_content)
+        page = template.render(title=title, page_content=page_content)
+        self.logger.debug(f"Index for {self.current_dir}:\n{page}")
 
     def generate_containing(self, c_id: str) -> str:
         template = self.jinja_environment.get_template(
@@ -174,6 +178,24 @@ class RecursiveIndexer:
         with open("index.html", "w") as f:
             page = self.generate_index_page()
             f.write(page)
+
+    def copy_sitewide_files(self) -> None:
+        if self.current_dir != self.base_dir:
+            self.logger.error(
+                "Cannot copy sitewide files since cwd "
+                + f"{self.current_dir} != base directory "
+                + f"{self.base_dir}"
+            )
+            return
+        tgt_scriptdir = Path(self.base_dir / "scripts")
+        src_scriptdir = Path(__file__ / "assets" / "scripts")
+        for scriptfile in src_scriptdir:
+            shutil.copyfile(scriptfile, Path(tgt_scriptdir / scriptfile.name))
+            self.logger.debug("Copied {scriptfile} to {tgt_scriptdir}")
+        shutil.copyfile(
+            self.base_dir / "assets" / "file-text.svg",
+            Path(self.base_dir / "favicon.svg"),
+        )
 
     def index_pages(self) -> None:
         # Generate our own index page first
