@@ -2,11 +2,18 @@
 RecursiveIndexer class: create an index page for a directory containing PDF
 files and JPGs and subdirectories of PDF files and JPGs.  Skip any directory
 named "Text" or "Thumbs" since those contain extracted text and preview images.
+
+This first version is synchronous.  Some level of parallelism is clearly
+desirable, but the text-extraction task, in particular, is extremely disk- and
+CPU-intensive, and figuring out a way to rate-limit it will be difficult.
 """
 import logging
 import os
+import re
 import shutil
+import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import List, Union
 from urllib.parse import ParseResult, quote, urlparse
 
@@ -29,7 +36,22 @@ def _uplink(l_id: str) -> str:
     return fragment.format(containing_id=l_id)
 
 
-class RecursiveIndexer:
+def _check_file_for_text(f: Path) -> bool:
+    try:
+        st = f.stat()
+    except FileNotFoundError:
+        return False
+    # If we find a word character in the first 1K of the file, we feel like
+    # we got some text.
+    if st.st_size != 0 and st.st_size != 4:
+        with open(str(f), "r") as fh:
+            buf = fh.read(1024)
+            if re.search(r"\w", buf):
+                return True
+    return False
+
+
+class Indexer:
     def __init__(
         self,
         base_url: Union[str, ParseResult],
@@ -117,6 +139,14 @@ class RecursiveIndexer:
             loader=FileSystemLoader(Path(_here / "templates"))
         )
 
+        # Figure out what's in the directory
+        self.dirs: List[Path] = list()
+        self.files: List[Path] = list()
+        self.archives: List[Path] = list()
+        self.get_directory_components()
+
+        self.children: List[Indexer] = list()
+
     @property
     def path_to_base_str(self) -> str:
         return str(self.path_to_base)
@@ -125,11 +155,27 @@ class RecursiveIndexer:
     def relative_path_str(self) -> str:
         return str(self.relative_path)
 
-    def generate_index_page(self) -> str:
+    def _run(self, args: List[str]) -> None:
+        argstr = " ".join(args)
+        self.logger.info(f"Running command '{argstr}'")
+        proc = subprocess.run(args, capture_output=True)
+        if proc.returncode != 0:
+            self.logger.warning(
+                f"Command '{argstr}' failed: rc {proc.returncode}\n"
+                + f" -> stdout: {proc.stdout.decode()}\n"
+                f" -> stderr: {proc.stderr.decode()}"
+            )
+        else:
+            self.logger.debug(
+                f"Command '{argstr}' succeeded\n"
+                + f" -> stdout: {proc.stdout.decode()}\n"
+                f" -> stderr: {proc.stderr.decode()}"
+            )
+
+    def get_directory_components(self) -> None:
         dirs: List[Path] = list()
         files: List[Path] = list()
         archives: List[Path] = list()
-
         # Categorize contents and incidentally
         # set file mode appropriately
         # TODO: add archive expansion
@@ -163,7 +209,11 @@ class RecursiveIndexer:
                     child.chmod(0o644)
             rescan = False  # When we do archive expansion we will set it to
             # true after expanding archives
+        self.dirs = dirs
+        self.files = files
+        self.archives = archives
 
+    def generate_index_page(self) -> str:
         if self.current_dir == self.base_dir:
             self.copy_sitewide_files()
             enc_t = ""
@@ -172,9 +222,9 @@ class RecursiveIndexer:
             enc_t = _uplink("top")
             enc_b = _uplink("bottom")
 
-        file_content = self.generate_file_content(files)
-        dir_content = self.generate_dir_content(dirs)
-        archive_content = self.generate_archive_content(archives)
+        file_content = self.generate_file_content()
+        dir_content = self.generate_dir_content()
+        archive_content = self.generate_archive_content()
 
         page_content = (
             enc_t + file_content + dir_content + archive_content + enc_b
@@ -193,27 +243,27 @@ class RecursiveIndexer:
         )
         return page
 
-    def generate_dir_content(self, dirs: List[Path]) -> str:
-        if not dirs:
+    def generate_dir_content(self) -> str:
+        if not self.dirs:
             return ""
         tbl_template = self.jinja_environment.get_template("dirtable.template")
         dir_template = self.jinja_environment.get_template("dir.template")
         dir_string = ""
-        for c, d in enumerate(dirs):
+        for c, d in enumerate(self.dirs):
             dir_string += dir_template.render(
                 dir_id=str(c), dir_name=quote(d.name)
             )
         return tbl_template.render(dirs=dir_string)
 
-    def generate_archive_content(self, archives: List[Path]) -> str:
-        if not archives:
+    def generate_archive_content(self) -> str:
+        if not self.archives:
             return ""
         tbl_template = self.jinja_environment.get_template(
             "archivetable.template"
         )
         arc_template = self.jinja_environment.get_template("archive.template")
         arc_string = ""
-        for c, a in enumerate(archives):
+        for c, a in enumerate(self.archives):
             fname = quote(a.name)
             basename = quote(a.stem)
             arc_string += arc_template.render(
@@ -221,15 +271,15 @@ class RecursiveIndexer:
             )
         return tbl_template.render(archives=arc_string)
 
-    def generate_file_content(self, files: List[Path]) -> str:
-        if not files:
+    def generate_file_content(self) -> str:
+        if not self.files:
             return ""
         tbl_template = self.jinja_environment.get_template(
             "filetable.template"
         )
         file_template = self.jinja_environment.get_template("file.template")
         file_string = ""
-        for c, f in enumerate(files):
+        for c, f in enumerate(self.files):
             fname = quote(f.name)
             basename = quote(f.stem)
             file_string += file_template.render(
@@ -242,6 +292,103 @@ class RecursiveIndexer:
                 text_name=f"{basename}.txt",
             )
         return tbl_template.render(files=file_string)
+
+    def generate_thumbnails(self) -> None:
+        """Someday we should do this with pgmagick, but I can't get boost
+        to work in my environment with it right now."""
+        for f in self.files:
+            thumb_name = f"{f.stem}_thumb.png"
+            thumb_path = Path(
+                self.path_to_base / "Thumbs" / self.relative_path / thumb_name
+            )
+            try:
+                thumb_path.stat()
+                self.logger.info(f"{thumb_path} already exists")
+                continue
+            except FileNotFoundError:
+                pass
+            args = [
+                "gm",
+                "convert",
+                "-geometry",
+                "150x100",
+                f"{f}",
+                "-resize",
+                "150x100",
+                "-strip",
+                f"{thumb_path}",
+            ]
+            thumb_path.parent.mkdir(exist_ok=True)
+            self._run(args)
+            try:
+                thumb_path.stat()
+            except FileNotFoundError:
+                shutil.copyfile(
+                    Path(_here / "assets" / "png" / "no_image.png"), thumb_path
+                )
+
+    def extract_text(self) -> None:
+        """Someday we should do this with pgmagick, but I can't get boost
+        to work in my environment with it right now."""
+        for f in self.files:
+            text_name = f"{f.stem}.txt"
+            text_path = Path(
+                self.path_to_base / "Text" / self.relative_path / text_name
+            )
+            try:
+                text_path.stat()
+                self.logger.info(f"{text_path} already exists")
+                continue
+            except FileNotFoundError:
+                pass
+            if f.suffix.lower() == "pdf":
+                args = ["pdftotext", "-q", f"{f}", f"{text_path}"]
+            else:
+                args = ["gocr", "-i", f"{f}", "-o", f"{text_path}"]
+            text_path.parent.mkdir(exist_ok=True)
+            self._run(args)
+            try:
+                if _check_file_for_text(text_path):
+                    self.logger.info(
+                        f"Low-effort extraction for '{text_path}' succeeded"
+                    )
+                    continue  # Next file, please
+            except FileNotFoundError:
+                pass
+            if f.suffix.lower() == "pdf":
+                self.logger.info(f"Extracting text the hard way for {f}")
+                with TemporaryDirectory() as tmpdir:
+                    tmpfile = Path(  # Don't know why I need the type:ignore
+                        str(tmpdir) / f"{f.stem}.tif"
+                    )  # type:ignore
+                    # We're assuming that 16-intensity @120dpi should be enough
+                    # for text recognition
+                    # Stage 1: convert to TIFF
+                    args = [
+                        "gm",
+                        "convert",
+                        "-density",
+                        "120x120",
+                        f"{f}",
+                        "-depth",
+                        "4",
+                        "-strip",
+                        "-background",
+                        "white",
+                        "-monitor",
+                        "-debug",
+                        "Cache",
+                        f"{tmpfile}",
+                    ]
+                    self._run(args)
+                    # Stage 2: Run tesseract on it (very CPU- and memory- and
+                    # disk-intensive)
+                    args = ["tesseract", f"{tmpfile}", f"{text_path}"]
+                    self._run(args)
+                    if not _check_file_for_text(text_path):
+                        # Well, crap.
+                        with open(text_path, "w") as tf:
+                            tf.write(f"Could not extract text from {f.name}\n")
 
     def write_index_page(self) -> None:
         with open("index.html", "w") as f:
@@ -271,9 +418,19 @@ class RecursiveIndexer:
             Path(self.base_dir / "favicon.svg"),
         )
 
-    def index_pages(self) -> None:
-        # Generate our own index page first
+    def index_text(self) -> None:
+        if not self.is_root:
+            self.logger.error("Cannot index text from non-root Indexer")
+            return
+        self.logger.warning("Text indexer not yet functional")
+
+    def build_outputs(self) -> None:
         self.write_index_page()
+        self.generate_thumbnails()
+        self.extract_text()
+
+    def build_site(self) -> None:
+        self.build_outputs()
         # Now recurse down the tree
         for child in self.current_dir.iterdir():
             if child.is_dir():
@@ -293,4 +450,8 @@ class RecursiveIndexer:
                     resolve=self.resolve,
                     debug=self.debug,
                 )
-                childindexer.index_pages()
+                self.children.append(childindexer)
+                childindexer.build_site()
+        # If and only if we are the root node, index the collected text
+        if self.is_root:
+            self.index_text()

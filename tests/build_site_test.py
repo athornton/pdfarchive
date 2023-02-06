@@ -1,15 +1,15 @@
 import filecmp
 from pathlib import Path
 
-from pdfarchive.index import RecursiveIndexer
+from pdfarchive.index import Indexer
 
 
-def test_build_indexes(testdata: Path, src_testdata: Path) -> None:
-    indexer = RecursiveIndexer(
+def test_build_site(testdata: Path, src_testdata: Path) -> None:
+    indexer = Indexer(
         base_dir=Path(testdata / "index"), base_url="file:///.", debug=True
     )
     filecmp.clear_cache()
-    indexer.index_pages()
+    indexer.build_site()
     output_files = sorted(
         Path(src_testdata / "output" / "index").glob("**/index.html")
     )
