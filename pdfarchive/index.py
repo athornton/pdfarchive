@@ -1,7 +1,7 @@
-"""
-RecursiveIndexer class: create an index page for a directory containing PDF
-files and JPGs and subdirectories of PDF files and JPGs.  Skip any directory
-named "Text" or "Thumbs" since those contain extracted text and preview images.
+"""Indexer class: create an index page for a directory containing PDF
+files and JPGs and subdirectories of PDF files and JPGs.  Skip any
+directory named "Text" or "Thumbs" since those contain extracted text
+and preview images.
 
 This first version is synchronous.  Some level of parallelism is clearly
 desirable, but the text-extraction task, in particular, is extremely disk- and
@@ -20,6 +20,8 @@ from urllib.parse import ParseResult, quote, urlparse
 from jinja2 import Environment, FileSystemLoader
 
 _here = Path(__file__).parent
+
+_skipdirs = ("scripts", "css", "config", "Thumbs", "Text")
 
 
 def _uplink(l_id: str) -> str:
@@ -58,6 +60,7 @@ class Indexer:
         base_dir: Union[str, Path],
         archive_title: str = "",
         current_dir: Union[str, Path, None] = None,
+        indexer_conf_dir: Union[str, Path, None] = None,
         resolve: bool = True,
         debug: bool = False,
     ) -> None:
@@ -83,6 +86,10 @@ class Indexer:
             self.current_dir = Path(current_dir)
         else:
             self.current_dir = self.base_dir
+        if indexer_conf_dir:
+            self.indexer_conf_dir = Path(indexer_conf_dir)
+        else:
+            self.indexer_conf_dir = Path(self.base_dir / "config")
         self.resolve = resolve
         self.debug = debug
 
@@ -108,6 +115,9 @@ class Indexer:
                 walk_path = walk_path.parent
             self.path_to_base = path_to_base
             self.is_root = False
+
+        if self.is_root:
+            self.copy_sitewide_files()
 
         # Set cwd and umask
         os.chdir(self.current_dir)
@@ -187,12 +197,7 @@ class Indexer:
             for child in self.current_dir.iterdir():
                 if child.is_dir():
                     # Skip the top-level scripts, css, Thumbs, and Text dirs
-                    if self.is_root and child.name in (
-                        "scripts",
-                        "css",
-                        "Thumbs",
-                        "Text",
-                    ):
+                    if self.is_root and child.name in _skipdirs:
                         continue
                     dirs.append(child)
                 if child.is_file():
@@ -214,8 +219,7 @@ class Indexer:
         self.archives = archives
 
     def generate_index_page(self) -> str:
-        if self.current_dir == self.base_dir:
-            self.copy_sitewide_files()
+        if self.is_root:
             enc_t = ""
             enc_b = ""
         else:
@@ -359,8 +363,8 @@ class Indexer:
                 self.logger.info(f"Extracting text the hard way for {f}")
                 with TemporaryDirectory() as tmpdir:
                     tmpfile = Path(  # Don't know why I need the type:ignore
-                        str(tmpdir) / f"{f.stem}.tif"
-                    )  # type:ignore
+                        str(tmpdir) / f"{f.stem}.tif"  # type:ignore
+                    )
                     # We're assuming that 16-intensity @120dpi should be enough
                     # for text recognition
                     # Stage 1: convert to TIFF
@@ -417,12 +421,35 @@ class Indexer:
             _here / "assets" / "file-text.svg",
             Path(self.base_dir / "favicon.svg"),
         )
+        self.indexer_conf_dir.mkdir(exist_ok=True)
+        shutil.copyfile(
+            _here / "assets" / "site.conf", self.indexer_conf_dir / "site.conf"
+        )
+
+    def write_indexer_config(self) -> Path:
+        confdir = self.indexer_conf_dir
+        fname = "swish-e.conf"
+        conf_file = Path(confdir / fname)
+        conf_template = self.jinja_environment.get_template(
+            "swish-e.conf.template"
+        )
+        indexer_conf = conf_template.render(
+            confdir=confdir,
+            index_file=conf_file,
+            text_dir=f"{self.base_dir / 'Text'}",
+            relative_dir=f"{self.relative_path_str}",
+        )
+        with open(conf_file, "w") as f:
+            f.write(indexer_conf)
+        return conf_file
 
     def index_text(self) -> None:
         if not self.is_root:
             self.logger.error("Cannot index text from non-root Indexer")
             return
-        self.logger.warning("Text indexer not yet functional")
+        swconf = self.write_indexer_config()
+        args = ["swish-e", "-c", f"{swconf}"]
+        self._run(args)
 
     def build_outputs(self) -> None:
         self.write_index_page()
@@ -434,13 +461,9 @@ class Indexer:
         # Now recurse down the tree
         for child in self.current_dir.iterdir():
             if child.is_dir():
-                # Skip the top-level scripts, css, Thumbs, and Text dirs
-                if self.is_root and child.name in (
-                    "scripts",
-                    "css",
-                    "Thumbs",
-                    "Text",
-                ):
+                # Skip the top-level scripts, css, config, Thumbs, and Text
+                # dirs
+                if self.is_root and child.name in _skipdirs:
                     continue
                 child.chmod(0o755)
                 childindexer = self.__class__(
