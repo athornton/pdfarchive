@@ -1,6 +1,6 @@
 <div class="archive" id="archiveid_{{archive_id}}">
-    <a href="./{{archive_name}}"
-       data-feather="archive">
-       {{archive_name}}
+    <i data-feather="archive"></i>
+    <a href="{{archive_name}}">
+       {{base_name}}
     </a>
 </div>

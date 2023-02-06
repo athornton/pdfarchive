@@ -1,3 +1,8 @@
 <div class="csstable" id="filelist">
+<h2>
+Files
+</h2>
 {{files}}
 </div>
+<div style="clear: both"></div>
+<hr>

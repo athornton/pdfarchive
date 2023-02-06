@@ -1,32 +1,33 @@
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
-<link href="/css/rpg.css" rel="stylesheet" type="text/css" />
+<link href="{{top_dir}}/css/pdf.css" rel="stylesheet" type="text/css" />
 <title>
 {{title}}
 </title>
 <meta charset="UTF-8">
 </head>
 <body>
-<script src="/scripts/jquery-3.6.3.min.js"></script>
-<script src="/scripts/shade.js"></script>
-<script src="/scripts/feather.min.js"></script>
+<script src="{{top_dir}}/scripts/jquery-3.6.3.min.js"></script>
+<script src="{{top_dir}}/scripts/shade.js"></script>
+<script src="{{top_dir}}/scripts/feather.min.js"></script>
 <div id="wholepage">
 <div id="header">
     <h1>
         {{title}}
     </h1>
+    <div style="clear: both"></div>
     <hr>
     <h2>
         Search Text
     </h2>
-        <a href="/cgi-bin/search.cgi"
-	   data-feather="search">
+    <a href="/cgi-bin/search.cgi"
+       data-feather="search">
 	    Search for text in {{top_name}}
-	</a>
-        <p>
-<div style="clear: both"></div>
-<hr>
+    </a>
+    <p>
+    <div style="clear: both"></div>
+    <hr>
 {{page_content}}
 <script>
   feather.replace()

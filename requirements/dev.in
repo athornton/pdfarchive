@@ -1,4 +1,6 @@
 # Requirements for development
+coverage
 pre-commit
 pytest
+pytest-cov
 mypy

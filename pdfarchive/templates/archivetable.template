@@ -1,3 +1,8 @@
 <div class="csstable" id="archivelist">
+<h2>
+Archive Files
+</h2>
 {{archives}}
 </div>
+<div style="clear: both"></div>
+<hr>

@@ -1,3 +1,8 @@
 <div class="csstable" id="dirlist">
+<h2>
+Folders
+</h2>
 {{dirs}}
 </div>
+<div style="clear: both"></div>
+<hr>

@@ -1,6 +1,6 @@
 <div class="dir" id="dirid_{{dir_id}}">
-    <a href="{{./{{dir_name}}"
-       data-feather="folder">
+    <i data-feather="folder"></i>
+    <a href="{{dir_name}}/index.html">
        {{dir_name}}
     </a>
 </div>

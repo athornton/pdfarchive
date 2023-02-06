@@ -11,10 +11,10 @@ build-backend = 'setuptools.build_meta'
 [tool.coverage.run]
 parallel = true
 branch = true
-source = ["pdfarchive"]
+source = ["."]
 
 [tool.coverage.paths]
-source = [".", ".tox/*/site-packages"]
+source = ["pdfarchive", ".tox/*/site-packages"]
 
 [tool.coverage.report]
 show_missing = true
@@ -55,7 +55,6 @@ known_first_party = ["pdfarchive", "tests"]
 skip = ["docs/conf.py"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "strict"
 # The python_files setting is not for test detection (pytest will pick up any
 # test files named *_test.py without this setting) but to enable special
 # assert processing in any non-test supporting files under tests.  We
