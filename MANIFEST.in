@@ -1,1 +1,2 @@
-include pdfarchive/templates/*
+recursive-include pdfarchive/templates/*
+recursive-include pdfarchive/assets/*

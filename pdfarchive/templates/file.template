@@ -3,10 +3,13 @@
     <img src="{{base_path}}/Thumbs/{{partial_path}}/{{thumb_name}}"
          alt="[{{base_name}}]"
          title="[{{base_name}}]">
-    <br>	 
+    <br>
+    {{base_name}}
     </a>
     <br>
     <a href="{{base_path}}/Text/{{partial_path}}/{{text_name}}">
+    <br>
     [text]
     </a>
+    <br>
 <div>

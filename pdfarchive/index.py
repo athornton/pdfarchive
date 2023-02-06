@@ -7,6 +7,7 @@ This first version is synchronous.  Some level of parallelism is clearly
 desirable, but the text-extraction task, in particular, is extremely disk- and
 CPU-intensive, and figuring out a way to rate-limit it will be difficult.
 """
+import inspect
 import logging
 import os
 import re
@@ -56,13 +57,13 @@ def _check_file_for_text(f: Path) -> bool:
 class Indexer:
     def __init__(
         self,
-        base_url: Union[str, ParseResult],
-        base_dir: Union[str, Path],
+        base_dir: Union[str, Path, None],
+        base_url: Union[str, ParseResult, Path, None] = None,
         archive_title: str = "",
-        current_dir: Union[str, Path, None] = None,
-        indexer_conf_dir: Union[str, Path, None] = None,
-        resolve: bool = True,
         debug: bool = False,
+        resolve: bool = True,
+        indexer_config_dir: Union[str, Path, None] = None,
+        current_dir: Union[str, Path, None] = None,
     ) -> None:
         """We presume that the document tree is writeable all the way up to
         the base_dir.  Assets will be copied to it, and the Thumbs and Text
@@ -70,28 +71,57 @@ class Indexer:
 
         Things will end messily if the indexer cannot write to a destination.
         """
-
         # Put everything into canonically-typed form  (Path can accept a
         # Path as input)
+        if not base_dir:
+            raise RuntimeError("base_dir must be specified")
+        self.base_dir = Path(base_dir)
+
+        if not base_url:
+            base_url = self.base_dir
+        for cls in inspect.getmro(type(base_url)):
+            # pathlib.Path is generally the parent of the base_dir class,
+            # which is a PosixPath or a WindowsPath.
+            #
+            # Mypy can't figure out that if Path is somewhere in our class
+            # hierarchy, we certainly do have an as_uri() method
+            if cls is Path:
+                base_url = base_url.as_uri()  # type: ignore
+                break
         if type(base_url) is str:
-            self.base_url = urlparse(base_url)
-        elif type(base_url) is ParseResult:
+            base_url = urlparse(base_url)
+        if type(base_url) is ParseResult:
             self.base_url = base_url
         else:
             # Shouldn't be able to happen, but mypy wasn't smart enough to
-            # realize that type(base_url) is either str or ParseResult
-            raise RuntimeError("base_url is neither str nor ParseResult")
-        self.base_dir = Path(base_dir)
+            # realize that type(base_url) would be ParseResult by now
+            raise RuntimeError(f"base_url {base_url} could not be established")
         if current_dir:
             self.current_dir = Path(current_dir)
         else:
             self.current_dir = self.base_dir
-        if indexer_conf_dir:
-            self.indexer_conf_dir = Path(indexer_conf_dir)
+        if indexer_config_dir:
+            self.indexer_config_dir = Path(indexer_config_dir)
         else:
-            self.indexer_conf_dir = Path(self.base_dir / "config")
+            self.indexer_config_dir = Path(self.base_dir / "config")
         self.resolve = resolve
         self.debug = debug
+
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+        ch = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+        self.logger.setLevel("INFO")
+        self.logger.info(f"Indexer created for {self.current_dir}")
+        if self.debug:
+            self.logger.setLevel("DEBUG")
+            self.logger.debug(
+                f"Debugging enabled for indexer at {self.current_dir}"
+            )
 
         # Do path resolution (if required) and sanity checks.
         # Resolution is turned on by default, but if you have part of your
@@ -116,34 +146,20 @@ class Indexer:
             self.path_to_base = path_to_base
             self.is_root = False
 
-        if self.is_root:
-            self.copy_sitewide_files()
+        self.has_swishe = False
+        self.check_for_installed_executables()
 
         # Set cwd and umask
         os.chdir(self.current_dir)
         os.umask(0o022)
 
+        if self.is_root:
+            self.copy_sitewide_files()
+
         if archive_title:
             self.archive_title = archive_title
         else:
             self.archive_title = self.base_dir.name
-
-        # Set up logging
-        self.logger = logging.getLogger(__name__)
-        ch = logging.StreamHandler()
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
-        self.logger.setLevel("INFO")
-        self.logger.info(f"Indexer created for {self.current_dir}")
-        if self.debug:
-            self.logger.setLevel("DEBUG")
-            self.logger.debug(
-                f"Debugging enabled for indexer at {self.current_dir}"
-            )
-
         # Set up template environment
         self.jinja_environment = Environment(
             loader=FileSystemLoader(Path(_here / "templates"))
@@ -181,6 +197,18 @@ class Indexer:
                 + f" -> stdout: {proc.stdout.decode()}\n"
                 f" -> stderr: {proc.stderr.decode()}"
             )
+
+    def check_for_installed_executables(self) -> None:
+        for exe in ("gm", "pdftotext", "gocr", "tesseract"):
+            if not shutil.which(exe):
+                raise RuntimeError(f"{exe} not found on path")
+        if self.is_root:
+            if not shutil.which("swish-e"):
+                self.logger.warning(
+                    "swish-e not found on path.  Cannot create text index."
+                )
+                return
+            self.has_swishe = True
 
     def get_directory_components(self) -> None:
         dirs: List[Path] = list()
@@ -345,7 +373,7 @@ class Indexer:
                 continue
             except FileNotFoundError:
                 pass
-            if f.suffix.lower() == "pdf":
+            if f.suffix.lower() == ".pdf":
                 args = ["pdftotext", "-q", f"{f}", f"{text_path}"]
             else:
                 args = ["gocr", "-i", f"{f}", "-o", f"{text_path}"]
@@ -359,12 +387,13 @@ class Indexer:
                     continue  # Next file, please
             except FileNotFoundError:
                 pass
-            if f.suffix.lower() == "pdf":
+            if f.suffix.lower() == ".pdf":
                 self.logger.info(f"Extracting text the hard way for {f}")
                 with TemporaryDirectory() as tmpdir:
-                    tmpfile = Path(  # Don't know why I need the type:ignore
-                        str(tmpdir) / f"{f.stem}.tif"  # type:ignore
-                    )
+                    self.logger.debug(f"Type(tmpdir) -> {type(tmpdir)}")
+                    self.logger.debug(f"tmpdir -> {tmpdir}")
+                    td_path = Path(tmpdir)
+                    tmpfile = Path(td_path / f"{f.stem}.tif")
                     # We're assuming that 16-intensity @120dpi should be enough
                     # for text recognition
                     # Stage 1: convert to TIFF
@@ -387,7 +416,10 @@ class Indexer:
                     self._run(args)
                     # Stage 2: Run tesseract on it (very CPU- and memory- and
                     # disk-intensive)
-                    args = ["tesseract", f"{tmpfile}", f"{text_path}"]
+                    #
+                    # Note that tesseract automatically adds the .txt, so...
+                    tess_output = Path(text_path.with_suffix(""))
+                    args = ["tesseract", f"{tmpfile}", f"{tess_output}"]
                     self._run(args)
                     if not _check_file_for_text(text_path):
                         # Well, crap.
@@ -421,13 +453,14 @@ class Indexer:
             _here / "assets" / "file-text.svg",
             Path(self.base_dir / "favicon.svg"),
         )
-        self.indexer_conf_dir.mkdir(exist_ok=True)
+        self.indexer_config_dir.mkdir(exist_ok=True)
         shutil.copyfile(
-            _here / "assets" / "site.conf", self.indexer_conf_dir / "site.conf"
+            _here / "assets" / "site.conf",
+            self.indexer_config_dir / "site.conf",
         )
 
     def write_indexer_config(self) -> Path:
-        confdir = self.indexer_conf_dir
+        confdir = self.indexer_config_dir
         fname = "swish-e.conf"
         conf_file = Path(confdir / fname)
         conf_template = self.jinja_environment.get_template(
@@ -448,8 +481,10 @@ class Indexer:
             self.logger.error("Cannot index text from non-root Indexer")
             return
         swconf = self.write_indexer_config()
+        os.chdir(self.indexer_config_dir)  # Will write output to cwd
         args = ["swish-e", "-c", f"{swconf}"]
         self._run(args)
+        os.chdir(self.current_dir)
 
     def build_outputs(self) -> None:
         self.write_index_page()
@@ -475,6 +510,7 @@ class Indexer:
                 )
                 self.children.append(childindexer)
                 childindexer.build_site()
-        # If and only if we are the root node, index the collected text
-        if self.is_root:
+        # If and only if we are the root node and we have swish-e
+        # installed, index the collected text
+        if self.is_root and self.has_swishe:
             self.index_text()
