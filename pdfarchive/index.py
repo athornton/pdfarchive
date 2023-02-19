@@ -12,13 +12,14 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import List, Union
 from urllib.parse import ParseResult, quote, urlparse
 
 from jinja2 import Environment, FileSystemLoader
+
+from .external import run
 
 _here = Path(__file__).parent
 
@@ -173,6 +174,9 @@ class Indexer:
 
         self.children: List[Indexer] = list()
 
+    def _run(self, args: List[str]) -> None:
+        run(args, self.logger)
+
     @property
     def path_to_base_str(self) -> str:
         return str(self.path_to_base)
@@ -180,23 +184,6 @@ class Indexer:
     @property
     def relative_path_str(self) -> str:
         return str(self.relative_path)
-
-    def _run(self, args: List[str]) -> None:
-        argstr = " ".join(args)
-        self.logger.info(f"Running command '{argstr}'")
-        proc = subprocess.run(args, capture_output=True)
-        if proc.returncode != 0:
-            self.logger.warning(
-                f"Command '{argstr}' failed: rc {proc.returncode}\n"
-                + f" -> stdout: {proc.stdout.decode()}\n"
-                f" -> stderr: {proc.stderr.decode()}"
-            )
-        else:
-            self.logger.debug(
-                f"Command '{argstr}' succeeded\n"
-                + f" -> stdout: {proc.stdout.decode()}\n"
-                f" -> stderr: {proc.stderr.decode()}"
-            )
 
     def check_for_installed_executables(self) -> None:
         for exe in ("gm", "pdftotext", "gocr", "tesseract"):
@@ -344,11 +331,11 @@ class Indexer:
                 "convert",
                 "-geometry",
                 "150x100",
-                f"'{f}[0]'",
+                f"{f}[0]",
                 "-resize",
                 "150x100",
                 "-strip",
-                f"'{thumb_path}'",
+                f"{thumb_path}",
             ]
             thumb_path.parent.mkdir(exist_ok=True, parents=True)
             self._run(args)
@@ -374,9 +361,9 @@ class Indexer:
             except FileNotFoundError:
                 pass
             if f.suffix.lower() == ".pdf":
-                args = ["pdftotext", "-q", f"'{f}'", f"'{text_path}'"]
+                args = ["pdftotext", "-q", f"{f}", f"{text_path}"]
             else:
-                args = ["gocr", "-i", f"'{f}'", "-o", f"'{text_path}'"]
+                args = ["gocr", "-i", f"'{f}'", "-o", f"{text_path}"]
             text_path.parent.mkdir(exist_ok=True, parents=True)
             self._run(args)
             try:
@@ -402,7 +389,7 @@ class Indexer:
                         "convert",
                         "-density",
                         "120x120",
-                        f"'{f}'",
+                        f"{f}",
                         "-depth",
                         "4",
                         "-strip",
@@ -411,7 +398,7 @@ class Indexer:
                         "-monitor",
                         "-debug",
                         "Cache",
-                        f"'{tmpfile}'",
+                        f"{tmpfile}",
                     ]
                     self._run(args)
                     # Stage 2: Run tesseract on it (very CPU- and memory- and
@@ -419,7 +406,7 @@ class Indexer:
                     #
                     # Note that tesseract automatically adds the .txt, so...
                     tess_output = Path(text_path.with_suffix(""))
-                    args = ["tesseract", f"'{tmpfile}'", f"'{tess_output}'"]
+                    args = ["tesseract", f"{tmpfile}", f"{tess_output}"]
                     self._run(args)
                     if not _check_file_for_text(text_path):
                         # Well, crap.
@@ -482,7 +469,7 @@ class Indexer:
             return
         swconf = self.write_indexer_config()
         os.chdir(self.indexer_config_dir)  # Will write output to cwd
-        args = ["swish-e", "-c", f"'{swconf}'"]
+        args = ["swish-e", "-c", f"{swconf}"]
         self._run(args)
         os.chdir(self.current_dir)
 
