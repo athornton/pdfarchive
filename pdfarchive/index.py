@@ -350,7 +350,7 @@ class Indexer:
                 "-strip",
                 f"'{thumb_path}'",
             ]
-            thumb_path.parent.mkdir(exist_ok=True)
+            thumb_path.parent.mkdir(exist_ok=True, parents=True)
             self._run(args)
             try:
                 thumb_path.stat()
