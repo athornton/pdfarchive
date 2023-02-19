@@ -3,11 +3,22 @@ from logging import Logger
 from typing import List, Optional
 
 
-def run(args: List[str], logger: Optional[Logger] = None) -> None:
+def run(
+    args: List[str],
+    logger: Optional[Logger] = None,
+    timeout: Optional[int] = None,
+) -> None:
     argstr = " ".join(args)
     if logger:
         logger.info(f"Running command '{argstr}'")
-    proc = subprocess.run(args, capture_output=True)
+    try:
+        proc = subprocess.run(args, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if logger:
+            logger.error(
+                f"Command '{argstr}' timed out after {timeout} seconds"
+            )
+            return
     if proc.returncode != 0:
         if logger:
             logger.warning(
