@@ -344,11 +344,11 @@ class Indexer:
                 "convert",
                 "-geometry",
                 "150x100",
-                f"{f}",
+                f"'{f}[0]'",
                 "-resize",
                 "150x100",
                 "-strip",
-                f"{thumb_path}",
+                f"'{thumb_path}'",
             ]
             thumb_path.parent.mkdir(exist_ok=True)
             self._run(args)
@@ -374,10 +374,10 @@ class Indexer:
             except FileNotFoundError:
                 pass
             if f.suffix.lower() == ".pdf":
-                args = ["pdftotext", "-q", f"{f}", f"{text_path}"]
+                args = ["pdftotext", "-q", f"'{f}'", f"'{text_path}'"]
             else:
-                args = ["gocr", "-i", f"{f}", "-o", f"{text_path}"]
-            text_path.parent.mkdir(exist_ok=True)
+                args = ["gocr", "-i", f"'{f}'", "-o", f"'{text_path}'"]
+            text_path.parent.mkdir(exist_ok=True, parents=True)
             self._run(args)
             try:
                 if _check_file_for_text(text_path):
@@ -388,7 +388,7 @@ class Indexer:
             except FileNotFoundError:
                 pass
             if f.suffix.lower() == ".pdf":
-                self.logger.info(f"Extracting text the hard way for {f}")
+                self.logger.info(f"Extracting text the hard way for '{f}'")
                 with TemporaryDirectory() as tmpdir:
                     self.logger.debug(f"Type(tmpdir) -> {type(tmpdir)}")
                     self.logger.debug(f"tmpdir -> {tmpdir}")
@@ -402,7 +402,7 @@ class Indexer:
                         "convert",
                         "-density",
                         "120x120",
-                        f"{f}",
+                        f"'{f}'",
                         "-depth",
                         "4",
                         "-strip",
@@ -411,7 +411,7 @@ class Indexer:
                         "-monitor",
                         "-debug",
                         "Cache",
-                        f"{tmpfile}",
+                        f"'{tmpfile}'",
                     ]
                     self._run(args)
                     # Stage 2: Run tesseract on it (very CPU- and memory- and
@@ -419,7 +419,7 @@ class Indexer:
                     #
                     # Note that tesseract automatically adds the .txt, so...
                     tess_output = Path(text_path.with_suffix(""))
-                    args = ["tesseract", f"{tmpfile}", f"{tess_output}"]
+                    args = ["tesseract", f"'{tmpfile}'", f"'{tess_output}'"]
                     self._run(args)
                     if not _check_file_for_text(text_path):
                         # Well, crap.
@@ -482,7 +482,7 @@ class Indexer:
             return
         swconf = self.write_indexer_config()
         os.chdir(self.indexer_config_dir)  # Will write output to cwd
-        args = ["swish-e", "-c", f"{swconf}"]
+        args = ["swish-e", "-c", f"'{swconf}'"]
         self._run(args)
         os.chdir(self.current_dir)
 
